@@ -62,7 +62,21 @@ proc sys_pwrite*(fd: cint, buffer: pointer, sz: int, offset: Off): cint {.cdecl,
   """
   toCError(result, err)
 
-proc sys_close*(fd: cint): cint {.cdecl, exportc.} = 
+proc sys_lseek*(fd: cint, offset: Off, whence: cint): Off {.cdecl, exportc.} =
+  var err: bool
+  asm """
+    ".intel_syntax;"
+    "mov rax, 478;"
+    "syscall;"
+    : "=a"(`result`), "=@ccc"(`err`)
+  """
+  if err:
+    errno = cint(result)
+    result = -1
+  else:
+    errno = 0
+
+proc sys_close*(fd: cint): cint {.cdecl, exportc.} =
   var err: bool
   asm """
     ".intel_syntax;"

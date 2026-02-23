@@ -9,10 +9,10 @@ import "./response"
 import "../requests"
 import "./object"
 
-proc sendfile*(fd: cint, soc: cint, 
+proc sendfile*(fd: cint, soc: cint,
                    offset: Off, nbytes: csize_t,
                   hdtr: pointer,sbytes: ptr Off,
-                  flags: cint): cint {.cdecl, importc:"sendfile", header:"<orbis/libkernel.h>".}
+                  flags: cint): cint {.cdecl, importc:"sendfile", header:"<sys/sendfile.h>".}
 
 
 type SizeResponse = object

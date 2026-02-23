@@ -3,6 +3,7 @@ cache/
 nimblecache/
 htmldocs/
 pkg/
+!pkg/sce_sys/icon0.png
 *.elf
 *.pkg
 helper.sh

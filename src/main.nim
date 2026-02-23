@@ -9,6 +9,7 @@ import "./savedata"
 import "./utils"
 import "./commands"
 import "./requests"
+import "./worker"
 # import os
 
 import libjbc
@@ -84,6 +85,10 @@ proc requestListener() {.async.} =
       discard sleepAsync(5000)
 
 asyncCheck requestListener()
+
+# Start HTTP worker if enabled
+if WORKER_ENABLED:
+  asyncCheck workerLoop()
 
 while true:
   poll()

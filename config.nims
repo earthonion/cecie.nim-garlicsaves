@@ -9,6 +9,8 @@ switch "nimcache", "./cache"
 switch "threads", "off"
 switch("cincludes", jbcPath)
 switch("passL", "-L" & jbcPath & " -ljbc")
+switch("path", getCurrentDir() / "orbis.nim" / "dist")
+switch("path", getCurrentDir() / "ps4-libjbc.nim")
 
 proc getContentId: string =
   let servId = getEnv("app_SERVICE_ID")
