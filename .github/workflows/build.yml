@@ -1,0 +1,120 @@
+name: Build cecie.nim PKG
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        submodules: recursive
+
+    - name: Install system dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y build-essential clang lld libssl1.1
+
+    - name: Fetch OpenOrbis PS4 Toolchain
+      run: |
+        gh release download v0.5.4 -R OpenOrbis/OpenOrbis-PS4-Toolchain -p 'toolchain-llvm-18.tar.gz'
+        mkdir -p /tmp/OpenOrbis
+        tar xzf toolchain-llvm-18.tar.gz -C /tmp/OpenOrbis --strip-components=2
+        chmod +x /tmp/OpenOrbis/bin/linux/*
+        rm toolchain-llvm-18.tar.gz
+      env:
+        GH_TOKEN: ${{ github.token }}
+
+    - name: Fetch prebuilt PS4 Nim compiler
+      run: |
+        gh release download latest -R earthonion/ps4-nim -p 'ps4nim-linux-x64.tar.gz'
+        mkdir -p /tmp/ps4nim
+        tar xzf ps4nim-linux-x64.tar.gz -C /tmp/ps4nim
+        echo "/tmp/ps4nim/bin" >> $GITHUB_PATH
+        rm ps4nim-linux-x64.tar.gz
+      env:
+        GH_TOKEN: ${{ github.token }}
+
+    - name: Patch libjbc headers for SDK compat
+      run: |
+        cd ps4-libjbc
+        cat > libjbc.h << 'HEADER'
+        #ifndef LIBJBC_H
+        #define LIBJBC_H
+        #include <stdint.h>
+        #include "jailbreak.h"
+        #include "kernelrw.h"
+        #include "utils.h"
+        typedef struct jbc_cred jbc_cred;
+        #endif
+        HEADER
+        cat > defs.h << 'HEADER'
+        #pragma once
+        #include <stdint.h>
+        #define AF_UNIX 1
+        #define SOCK_STREAM 1
+        #ifndef __DEFINED_size_t
+        typedef uint64_t size_t;
+        #define __DEFINED_size_t
+        #endif
+        #ifndef __DEFINED_ssize_t
+        typedef int64_t ssize_t;
+        #define __DEFINED_ssize_t
+        #endif
+        #ifndef __DEFINED_off_t
+        typedef int64_t off_t;
+        #define __DEFINED_off_t
+        #endif
+        #ifndef __DEFINED_uid_t
+        typedef uint32_t uid_t;
+        #define __DEFINED_uid_t
+        #endif
+        #ifndef __DEFINED_gid_t
+        typedef uint32_t gid_t;
+        #define __DEFINED_gid_t
+        #endif
+        #ifndef __DEFINED_pid_t
+        typedef uint32_t pid_t;
+        #define __DEFINED_pid_t
+        #endif
+        int socketpair(int domain, int type, int protocol, int* out);
+        ssize_t read(int fd, void* dst, size_t sz);
+        ssize_t write(int fd, const void* dst, size_t sz);
+        int close(int fd);
+        HEADER
+
+    - name: Build libjbc
+      run: |
+        cd ps4-libjbc
+        make
+        ar rcs libjbc.a jbc.o
+
+    - name: Set up PKG scaffold
+      run: |
+        mkdir -p pkg/sce_module pkg/sce_sys
+        cp /tmp/OpenOrbis/src/modules/libc.prx pkg/sce_module/
+        cp /tmp/OpenOrbis/src/modules/libSceFios2.prx pkg/sce_module/
+
+    - name: Build cecie.nim PKG
+      run: |
+        sed -i "s|\$OO_PS4_TOOLCHAIN|${OO_PS4_TOOLCHAIN}|g" /tmp/ps4nim/config/nim.cfg
+        nim build_pkg src/main
+      env:
+        OO_PS4_TOOLCHAIN: /tmp/OpenOrbis
+        app_SERVICE_ID: IV0000-HTOS00002_00-SAVEDATA00000000
+        app_TITLE_ID: HTOS00002
+        app_VERSION: "3.01"
+        app_TITLE: CECIE Web Queue
+        app_PKG_DIR: pkg
+        DOTNET_SYSTEM_GLOBALIZATION_INVARIANT: "1"
+
+    - name: Upload PKG artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: cecie-pkg
+        path: "*.pkg"
