@@ -8,4 +8,5 @@ export app_VERSION="3.01"
 export app_TITLE="CECIE Web Queue"
 export app_PKG_DIR="pkg"
 export DOTNET_SYSTEM_GLOBALIZATION_INVARIANT=1
+rm -rf cache
 nim build_pkg src/main

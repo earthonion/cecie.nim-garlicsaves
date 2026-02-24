@@ -504,6 +504,7 @@ proc processEncrypt(jobId: string, params: JsonNode) {.async.} =
   await workerLog(jobId, "INFO", "Creating save " & savename & " (" & $saveblocks & " blocks)...")
 
   setupCredentials()
+  await workerLog(jobId, "INFO", "Console max keyset: " & $getMaxKeySet())
 
   let saveDir = SAVE_DIRECTORY
   let createResult = createSave(saveDir, savename, saveblocks)
@@ -688,6 +689,70 @@ proc processReregion(jobId: string, params: JsonNode) {.async.} =
   await zipAndUploadResults(jobId, resultDir, workDir)
   removeRecursive(workDir)
 
+proc processKeyset(jobId: string, params: JsonNode) {.async.} =
+  await workerLog(jobId, "INFO", "Starting keyset check...")
+
+  let consoleMax = getMaxKeySet()
+  await workerLog(jobId, "INFO", "Console max keyset: " & $consoleMax)
+
+  var resultJson = %*{"maxKeyset": consoleMax, "files": []}
+
+  # Check if job has uploaded .bin files
+  let workDir = WORK_DIR & "/" & jobId
+  ensureDir(workDir)
+  let filesDir = workDir & "/files"
+  ensureDir(filesDir)
+  let resultDir = workDir & "/result"
+  ensureDir(resultDir)
+
+  var hasFiles = false
+  try:
+    await downloadAndExtract(jobId, workDir, filesDir)
+    hasFiles = true
+  except WorkerError:
+    await workerLog(jobId, "INFO", "No files uploaded, returning console keyset only")
+
+  if hasFiles:
+    for path in walkDirRec(filesDir):
+      if path.endsWith(".bin"):
+        let baseName = extractFilename(path)
+        let fd = sys_open(path.cstring, O_RDONLY, 0)
+        if fd == -1:
+          await workerLog(jobId, "WARNING", "Could not open " & baseName)
+          continue
+
+        var sealedKey: array[96, byte]
+        let bytesRead = sys_read(fd, sealedKey[0].addr, 96)
+        discard sys_close(fd)
+
+        if bytesRead < 96:
+          await workerLog(jobId, "WARNING", baseName & ": too small (" & $bytesRead & " bytes), skipping")
+          continue
+
+        let fileKeyset = getKeySetFromSealedKey(sealedKey)
+        let compatible = fileKeyset <= consoleMax
+
+        await workerLog(jobId, "INFO", baseName & ": keyset " & $fileKeyset &
+          (if compatible: " (compatible)" else: " (INCOMPATIBLE - needs " & $fileKeyset & ", console has " & $consoleMax & ")"))
+
+        resultJson["files"].add(%*{
+          "name": baseName,
+          "keyset": fileKeyset,
+          "compatible": compatible
+        })
+
+  # Write result JSON
+  let resultPath = resultDir & "/keyset.json"
+  let jsonStr = $resultJson
+  await workerLog(jobId, "INFO", "Result: " & jsonStr)
+  let outFd = sys_open(resultPath.cstring, O_CREAT or O_WRONLY or O_TRUNC, 0o777)
+  if outFd != -1:
+    discard sys_write(outFd, jsonStr[0].unsafeAddr, jsonStr.len)
+    discard sys_close(outFd)
+
+  await zipAndUploadResults(jobId, resultDir, workDir)
+  removeRecursive(workDir)
+
 # ---- Main worker loop ----
 
 proc workerLoop*() {.async.} =
@@ -729,6 +794,8 @@ proc workerLoop*() {.async.} =
           await processCreateSave(jobId, params)
         of "reregion":
           await processReregion(jobId, params)
+        of "keyset":
+          await processKeyset(jobId, params)
         else:
           await workerLog(jobId, "ERROR", "Unknown operation: " & operation)
           await workerSetStatus(jobId, "failed", "Unknown operation")

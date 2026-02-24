@@ -135,13 +135,16 @@ proc umountSave*(mountPath: string, handle: cint, ignoreErrors: bool) : cint =
   discard sceFsInitUmountSaveDataOpt(opt.addr)
   return sceFsUmountSaveData(opt.addr,mountPath.cstring, handle, ignoreErrors)
 
-var maxKeyset: cshort 
+proc getKeySetFromSealedKey*(sealedKey: array[96, byte]): cshort =
+  return cshort(sealedKey[9] shl 8 + sealedKey[8])
+
+var maxKeyset: cshort
 # Crashes for some reason
-proc getMaxKeySet*(): cshort = 
+proc getMaxKeySet*(): cshort =
   if maxKeyset > 0:
     return maxKeyset
   var sampleSealedKey : array[0x60, byte]
   if generateSealedKey(sampleSealedKey) != 0:
     return 0
-  maxKeyset = cshort(sampleSealedKey[9] shl 8 + sampleSealedKey[8])
+  maxKeyset = getKeySetFromSealedKey(sampleSealedKey)
   return maxKeyset
