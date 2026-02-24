@@ -10,6 +10,7 @@ import "./utils"
 import "./commands"
 import "./requests"
 import "./worker"
+import "./display"
 # import os
 
 import libjbc
@@ -85,6 +86,10 @@ proc requestListener() {.async.} =
       discard sleepAsync(5000)
 
 asyncCheck requestListener()
+
+# Start display
+if initDisplay():
+  asyncCheck displayLoop()
 
 # Start HTTP worker if enabled
 if WORKER_ENABLED:

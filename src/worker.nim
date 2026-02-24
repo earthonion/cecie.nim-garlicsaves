@@ -10,6 +10,7 @@ import "./config"
 import "./savedata"
 import "./syscalls"
 import "./commands/utils"
+import "./display"
 
 const WORK_DIR = "/data/cecie/work"
 
@@ -253,6 +254,7 @@ proc authHeaders(): seq[(string, string)] =
   @[("X-Worker-Key", WORKER_KEY)]
 
 proc workerLog(jobId: string, level: string, msg: string) {.async.} =
+  addDisplayLog("[" & level & "] " & msg)
   let body = $(%*{"level": level, "msg": msg})
   discard await httpPost(SERVER_HOST, SERVER_HTTP_PORT,
     "/api/worker/jobs/" & jobId & "/log", body, "application/json",
@@ -757,6 +759,7 @@ proc processKeyset(jobId: string, params: JsonNode) {.async.} =
 
 proc workerLoop*() {.async.} =
   log(lvlInfo, "Worker loop started, polling every ", $POLL_INTERVAL, "s")
+  displayState.maxKeyset = int(getMaxKeySet())
   ensureDir(WORK_DIR)
 
   while true:
@@ -779,6 +782,8 @@ proc workerLoop*() {.async.} =
       let params = jobData.getOrDefault("params")
 
       log(lvlInfo, "Worker picked up job: ", jobId, " (", operation, ")")
+      displayState.workerStatus = operation
+      displayState.currentJob = jobId
 
       await workerSetStatus(jobId, "running")
 
@@ -804,15 +809,24 @@ proc workerLoop*() {.async.} =
         # Process completed successfully
         await workerSetStatus(jobId, "done")
         await workerLog(jobId, "INFO", "Done! Your files are ready for download.")
+        displayState.jobsCompleted += 1
+        displayState.workerStatus = "idle"
+        displayState.currentJob = ""
       except WorkerError as e:
         log(lvlError, "Worker job failed: ", e.msg)
         await workerSetStatus(jobId, "failed", e.msg)
+        displayState.jobsFailed += 1
+        displayState.workerStatus = "idle"
+        displayState.currentJob = ""
         # Clean up work directory
         removeRecursive(WORK_DIR & "/" & jobId)
       except CatchableError as e:
         log(lvlError, "Worker job crashed: ", e.msg)
         await workerLog(jobId, "ERROR", "Internal error: " & e.msg)
         await workerSetStatus(jobId, "failed", e.msg)
+        displayState.jobsFailed += 1
+        displayState.workerStatus = "idle"
+        displayState.currentJob = ""
         removeRecursive(WORK_DIR & "/" & jobId)
 
     except CatchableError as e:

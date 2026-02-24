@@ -58,9 +58,9 @@ proc sceKernelAddWriteEvent*(a1: OrbisKernelEqueue; a2: cint; a3: csize_t;
                              a4: pointer): cint {.cdecl,
     importc: "sceKernelAddWriteEvent", header: "orbis/libkernel.h".}
 ##  Empty Comment
-#proc sceKernelAllocateDirectMemory*(a1: Off; a2: Off; a3: csize_t; a4: csize_t;
-#                                    a5: cint; a6: ptr Off): cint {.cdecl,
-#    importc: "sceKernelAllocateDirectMemory", header: "orbis/libkernel.h".}
+proc sceKernelAllocateDirectMemory*(a1: Off; a2: Off; a3: csize_t; a4: csize_t;
+                                    a5: cint; a6: ptr Off): cint {.cdecl,
+    importc: "sceKernelAllocateDirectMemory", header: "orbis/libkernel.h".}
 ##  Empty Comment
 #proc sceKernelAllocateMainDirectMemory*(a1: csize_t; a2: csize_t; a3: cint;
 #                                        a4: Off): int32 {.cdecl,

@@ -8,7 +8,8 @@ switch "mm", "orc"
 switch "nimcache", "./cache"
 switch "threads", "off"
 switch("cincludes", jbcPath)
-switch("passL", "-L" & jbcPath & " -ljbc")
+switch("passc", "-include " & (getCurrentDir() / "posix_shim.h"))
+switch("passL", "-L" & jbcPath & " -ljbc -lSceSysmodule -lSceFreeType")
 switch("path", getCurrentDir() / "orbis.nim" / "dist")
 switch("path", getCurrentDir() / "ps4-libjbc.nim")
 
