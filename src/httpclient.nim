@@ -1,8 +1,11 @@
 import asyncdispatch
 import asyncnet
+import json
 import strutils
 import posix
 import "./syscalls"
+
+const CHUNK_UPLOAD_SIZE* = 5 * 1024 * 1024  # 5MB - PS4 uploads at ~500KB/s, needs to finish within server timeout
 
 type HttpResponse* = tuple[status: int, headers: seq[(string, string)], body: string]
 
@@ -205,3 +208,94 @@ proc httpUploadFile*(host: string, port: int, path: string,
   let resp = await recvHttpResponse(sock)
   sock.close()
   return resp.status
+
+proc httpUploadFileChunked*(host: string, port: int, basePath: string,
+                             srcPath: string,
+                             headers: seq[(string, string)] = @[],
+                             onChunk: proc(i, total, chunkLen: int) = nil): Future[bool] {.async.} =
+  ## Upload a file in chunks via the chunked upload API.
+  ## basePath should be e.g. "/api/worker/jobs/<job_id>/result"
+  let fd = sys_open(srcPath.cstring, O_RDONLY, 0)
+  if fd == -1:
+    return false
+
+  let fileSize = int(sys_lseek(fd, Off(0), SEEK_END))
+  if fileSize <= 0:
+    discard sys_close(fd)
+    return false
+  discard sys_lseek(fd, Off(0), SEEK_SET)
+
+  # 1. Init chunked upload
+  let initBody = $(%*{"total_size": fileSize})
+  let initResp = await httpPost(host, port, basePath & "/init",
+    initBody, "application/json", headers)
+  if initResp.status != 200:
+    discard sys_close(fd)
+    return false
+
+  let initJson = parseJson(initResp.body)
+  let uploadId = initJson["upload_id"].getStr()
+
+  # 2. Upload chunks
+  let totalChunks = (fileSize + CHUNK_UPLOAD_SIZE - 1) div CHUNK_UPLOAD_SIZE
+  var chunkBuf = newString(CHUNK_UPLOAD_SIZE)
+
+  for i in 0 ..< totalChunks:
+    let chunkStart = i * CHUNK_UPLOAD_SIZE
+    let chunkLen = min(CHUNK_UPLOAD_SIZE, fileSize - chunkStart)
+
+    discard sys_lseek(fd, Off(chunkStart), SEEK_SET)
+
+    # Read chunk into buffer
+    var readTotal = 0
+    while readTotal < chunkLen:
+      let n = sys_read(fd, chunkBuf[readTotal].addr, chunkLen - readTotal)
+      if n <= 0:
+        break
+      readTotal += int(n)
+
+    if readTotal != chunkLen:
+      discard sys_close(fd)
+      return false
+
+    let chunkPath = basePath & "/chunk/" & $i & "?upload_id=" & uploadId
+
+    # Upload this chunk as raw body
+    var success = false
+    for attempt in 0 ..< 3:
+      let sock = newAsyncSocket()
+      await sock.connect(host, Port(port))
+
+      var req = "POST " & chunkPath & " HTTP/1.0\r\n"
+      req.add("Host: " & host & "\r\n")
+      for (k, v) in headers:
+        req.add(k & ": " & v & "\r\n")
+      req.add("Content-Type: application/octet-stream\r\n")
+      req.add("Content-Length: " & $chunkLen & "\r\n")
+      req.add("\r\n")
+      await sock.send(req)
+      await sock.send(chunkBuf[0].addr, chunkLen)
+
+      let resp = await recvHttpResponse(sock)
+      sock.close()
+
+      if resp.status == 200:
+        success = true
+        if onChunk != nil:
+          onChunk(i, totalChunks, chunkLen)
+        break
+
+      # Exponential backoff
+      await sleepAsync(1000 * (1 shl attempt))
+
+    if not success:
+      discard sys_close(fd)
+      return false
+
+  discard sys_close(fd)
+
+  # 3. Complete
+  let completeBody = $(%*{"upload_id": uploadId})
+  let completeResp = await httpPost(host, port, basePath & "/complete",
+    completeBody, "application/json", headers)
+  return completeResp.status == 200

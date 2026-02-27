@@ -269,9 +269,16 @@ proc workerSetStatus(jobId: string, status: string, error: string = "") {.async.
     authHeaders())
 
 proc uploadResultFile(jobId: string, srcPath: string): Future[bool] {.async.} =
-  let status = await httpUploadFile(SERVER_HOST, SERVER_HTTP_PORT,
-    "/api/worker/jobs/" & jobId & "/result", srcPath, authHeaders())
-  return status == 200
+  # Always use chunked upload — PS4 upload speed is slow and single-shot
+  # requests can timeout on the server even for small files
+  let basePath = "/api/worker/jobs/" & jobId & "/result"
+  let jid = jobId
+  proc logChunk(i, total, chunkLen: int) =
+    let mb = chunkLen div (1024 * 1024)
+    addDisplayLog("Uploaded chunk " & $(i + 1) & "/" & $total & " (" & $mb & "MB)")
+    asyncCheck workerLog(jid, "INFO", "Uploaded chunk " & $(i + 1) & "/" & $total)
+  return await httpUploadFileChunked(SERVER_HOST, SERVER_HTTP_PORT,
+    basePath, srcPath, authHeaders(), logChunk)
 
 proc downloadAndExtract(jobId: string, workDir: string, filesDir: string) {.async.} =
   ## Download job files and extract zip. Raises WorkerError on failure.
