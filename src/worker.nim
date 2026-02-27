@@ -13,6 +13,7 @@ import "./commands/utils"
 import "./display"
 
 const WORK_DIR = "/data/cecie/work"
+const JOB_TIMEOUT_MS = 30 * 60 * 1000  # 30 minutes max per job
 
 type WorkerError* = object of CatchableError
 const ZIP_LOCAL_HEADER_SIG = 0x04034b50'u32
@@ -795,23 +796,32 @@ proc workerLoop*() {.async.} =
       await workerSetStatus(jobId, "running")
 
       try:
+        var jobFut: Future[void]
         case operation
         of "resign":
-          await processResign(jobId, params)
+          jobFut = processResign(jobId, params)
         of "decrypt":
-          await processDecrypt(jobId, params)
+          jobFut = processDecrypt(jobId, params)
         of "encrypt":
-          await processEncrypt(jobId, params)
+          jobFut = processEncrypt(jobId, params)
         of "createsave":
-          await processCreateSave(jobId, params)
+          jobFut = processCreateSave(jobId, params)
         of "reregion":
-          await processReregion(jobId, params)
+          jobFut = processReregion(jobId, params)
         of "keyset":
-          await processKeyset(jobId, params)
+          jobFut = processKeyset(jobId, params)
         else:
           await workerLog(jobId, "ERROR", "Unknown operation: " & operation)
           await workerSetStatus(jobId, "failed", "Unknown operation")
           continue
+
+        let completed = await withTimeout(jobFut, JOB_TIMEOUT_MS)
+        if not completed:
+          raise newException(WorkerError, "Job timed out after " & $(JOB_TIMEOUT_MS div 1000) & " seconds")
+
+        # Check if the future itself raised
+        if jobFut.failed:
+          jobFut.read()  # re-raises the exception
 
         # Process completed successfully
         await workerSetStatus(jobId, "done")
