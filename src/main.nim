@@ -87,7 +87,8 @@ proc requestListener() {.async.} =
 
 asyncCheck requestListener()
 
-# Start display
+# Load previous logs and start display
+loadPreviousLogs()
 if initDisplay():
   asyncCheck displayLoop()
 

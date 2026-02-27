@@ -1,6 +1,10 @@
 import asyncdispatch
 import posix
 import logging
+import strutils
+
+import "./config"
+import "./syscalls"
 
 import "orbis/private/VideoOut"
 import "orbis/private/_types/video"
@@ -207,6 +211,33 @@ proc addDisplayLog*(msg: string) =
   displayState.recentLogs.add(msg)
   if displayState.recentLogs.len > MAX_LOG_LINES:
     displayState.recentLogs.delete(0)
+  # Append to persistent log file
+  let fd = sys_open(LOG_FILE.cstring, O_CREAT or O_WRONLY or O_APPEND, 0o777)
+  if fd != -1:
+    let line = msg & "\n"
+    discard sys_write(fd, line[0].unsafeAddr, line.len)
+    discard sys_close(fd)
+
+proc loadPreviousLogs*() =
+  ## Read previous logs from LOG_FILE into displayState.recentLogs on startup.
+  let fd = sys_open(LOG_FILE.cstring, O_RDONLY, 0)
+  if fd == -1:
+    return
+  let size = int(sys_lseek(fd, Off(0), SEEK_END))
+  if size <= 0:
+    discard sys_close(fd)
+    return
+  discard sys_lseek(fd, Off(0), SEEK_SET)
+  var buf = newString(size)
+  discard sys_read(fd, buf[0].addr, size)
+  discard sys_close(fd)
+  # Take last MAX_LOG_LINES lines
+  var lines: seq[string] = @[]
+  for line in buf.splitLines():
+    if line.len > 0:
+      lines.add(line)
+  let start = max(0, lines.len - MAX_LOG_LINES)
+  displayState.recentLogs = lines[start ..< lines.len]
 
 proc renderFrame() =
   let bg = Color(r: 20, g: 22, b: 30)
