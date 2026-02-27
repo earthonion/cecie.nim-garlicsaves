@@ -118,3 +118,16 @@ jobs:
       with:
         name: cecie-pkg
         path: "*.pkg"
+
+    - name: Create release
+      if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+      run: |
+        TAG="v$(date +'%Y%m%d-%H%M%S')"
+        SHORT_SHA="${GITHUB_SHA::7}"
+        COMMIT_MSG=$(git log -1 --pretty=%s)
+        gh release create "$TAG" *.pkg \
+          --title "$COMMIT_MSG" \
+          --notes "Built from [\`${SHORT_SHA}\`](${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/commit/${GITHUB_SHA})" \
+          --latest
+      env:
+        GH_TOKEN: ${{ github.token }}
